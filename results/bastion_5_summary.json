@@ -1,7 +1,7 @@
 {
   "bastion_idx": 5,
   "case_description": "DB BYPASS ADDED + Double edges",
-  "timestamp": "2026-04-30T19:42:00.912458",
+  "timestamp": "2026-06-24T13:39:57.646967",
   "config": {
     "n_runs": 10,
     "simulation_episodes": 3000,

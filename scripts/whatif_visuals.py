@@ -1,31 +1,45 @@
 """
 What-If Comparison Script — Dual-Specification Safety Game Analysis
 ====================================================================
-Loads all case_{IDX}_summary.json files from ../results/
-and produces the 4 paper figures.
+Loads all bastion_{IDX}_summary.json files from ../results/
+and produces the 4 paper figures, JAIR-camera-ready.
 
-Requirements:
+Data contract (UNCHANGED from the original — every value is read from JSON,
+nothing is computed from assumptions or filled in by hand):
     Each summary.json must contain:
-    - "results" → MARL metrics (reward, dominance, per_run, CIs)
-    - "safety_game" → attractor/shield metrics from analyzer
-    Case descriptions are defined in CASE_DESCRIPTIONS at the top of this file.
+    - "results"     -> MARL metrics (reward, dominance, per_run, CIs)
+    - "safety_game" -> attractor/shield metrics from the analyzer
+    Case descriptions live in CASE_DESCRIPTIONS below.
 
 Run AFTER all 5 case studies have completed.
+
+JAIR polish (vs. the draft figures):
+    * EMBED_TITLES=False -> embedded titles stripped; the LaTeX \\caption{} carries them.
+    * All secondary text darkened from wispy gray to charcoal (survives B/W print).
+    * fig1: per-axis normalization disclosed in-figure (kills the "balanced hexagon" trap).
+    * fig2: |W| subtext enlarged/bolded/darkened + thousands separators; bold axis key.
+    * fig3: x-axis capped at 100% (no dead space); |W| totals moved into the y labels.
+    * fig4: case captions upright+dark, reference label darkened, CI bar made deliberate;
+            jitter seeded so the figure is reproducible across rebuilds.
 """
 
 import os
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 # ═══════════════════════════════════════════════════════════
 #  CONFIG
 # ═══════════════════════════════════════════════════════════
 RESULTS_DIR = "../results"
-OUTPUT_DIR = "../results/paper_figures"
+OUTPUT_DIR  = "../results/paper_figures"
 CASE_INDICES = [1, 2, 3, 4, 5]
 
-# ── Fill these in — displayed on figures and table ──
+# Reproducible jitter for the dominance swarm (fig4). Seed -> identical figure every build.
+RNG_SEED = 11
+
+# ── Case descriptions — displayed on figures and table ──
 CASE_DESCRIPTIONS = {
     1: "Baseline topology",
     2: "Fully connected topology",
@@ -36,19 +50,24 @@ CASE_DESCRIPTIONS = {
 
 # ── Academic palette: colorblind-safe, high contrast on white ──
 COLORS = {
-    1: "#2C5F8A",   # deep blue      — baseline (authoritative)
-    2: "#D4652F",   # burnt orange    — full connectivity
-    3: "#1B998B",   # teal           — relaxed φ_D
-    4: "#A4243B",   # crimson        — relaxed φ_A
-    5: "#5C4D7D",   # slate purple   — no VPN bypass
+    1: "#2C5F8A",   # deep blue     — baseline (authoritative)
+    2: "#D4652F",   # burnt orange  — full connectivity
+    3: "#1B998B",   # teal          — relaxed phi_A
+    4: "#A4243B",   # crimson       — relaxed phi_D
+    5: "#5C4D7D",   # slate purple  — no VPN bypass
 }
 BG_COLOR     = "#FFFFFF"
 GRID_COLOR   = "#E0E0E0"
 TEXT_COLOR   = "#2D2D2D"
+MUTED_COLOR  = "#33373B"   # dark charcoal for SECONDARY text — survives B/W print
 ACCENT_COLOR = "#2C5F8A"
 SPINE_COLOR  = "#BDBDBD"
 
-# Radar axis labels (short names for the chart)
+# JAIR mode: figure captions carry the title, so strip embedded suptitles.
+# Flip to True for slides / talks where a self-contained title helps.
+EMBED_TITLES = False
+
+# Radar axis labels (full names, single radar)
 METRIC_LABELS = [
     "Attackability",
     "Sinking\nRatio",
@@ -57,6 +76,8 @@ METRIC_LABELS = [
     "Violation\nProximity",
     "Attacker\nDominance",
 ]
+# Short axis codes (small multiples)
+METRIC_CODES = ["ATK", "SNK", "FRC", "STP", "VPX", "ADR"]
 METRIC_KEYS = [
     "attackability",
     "sinking_ratio",
@@ -65,14 +86,16 @@ METRIC_KEYS = [
     "mean_steps_to_violation",
     "attacker_dominance",
 ]
-# All axes: higher = more dangerous. MSV is inverted (1/MSV) on radar only.
-# Attacker dominance is derived (1 - DDR/100), not stored directly.
+# All axes: higher = more dangerous. MSV is inverted (1/(MSV-1)) on the radar only,
+# so that "more steps to violation" reads as LOWER proximity. The printed VPX number
+# is therefore the proximity SCORE, not a step count — note this in the caption.
 INVERT_ON_RADAR = {"mean_steps_to_violation"}
 
 
 def _get_radar_values(case_dict):
     """Extract radar values from a full case dict. All axes: higher = worse.
-    5 from safety_game, 1 derived from MARL results (attacker dominance ratio)."""
+    5 come from safety_game, 1 is derived from MARL results (attacker dominance).
+    Every quantity is pulled straight from the JSON — no defaults invented."""
     sg = case_dict["safety_game"]
     vals = []
     for k in METRIC_KEYS:
@@ -82,9 +105,10 @@ def _get_radar_values(case_dict):
         else:
             v = sg[k]
             if k in INVERT_ON_RADAR:
-                v = 1.0 / max(v - 1.0, 0.01)  # strip minimum, avoid div/0 at MSV=1.0
+                v = 1.0 / max(v - 1.0, 0.01)  # strip the minimum, avoid div/0 at MSV=1.0
         vals.append(v)
     return vals
+
 
 # ═══════════════════════════════════════════════════════════
 #  LOAD DATA
@@ -93,6 +117,7 @@ def load_case(idx):
     path = os.path.join(RESULTS_DIR, f"bastion_{idx}_summary.json")
     with open(path, "r") as f:
         return json.load(f)
+
 
 def load_all_cases():
     cases = {}
@@ -109,15 +134,15 @@ def load_all_cases():
 #  STYLE SETUP
 # ═══════════════════════════════════════════════════════════
 def apply_academic_style():
-    """Clean academic style — NeurIPS/ICML ready."""
+    """Clean academic style — JAIR / NeurIPS / ICML ready."""
     plt.rcParams.update({
         "figure.facecolor":   BG_COLOR,
         "axes.facecolor":     BG_COLOR,
         "axes.edgecolor":     SPINE_COLOR,
         "axes.labelcolor":    TEXT_COLOR,
         "text.color":         TEXT_COLOR,
-        "xtick.color":       TEXT_COLOR,
-        "ytick.color":       TEXT_COLOR,
+        "xtick.color":        TEXT_COLOR,
+        "ytick.color":        TEXT_COLOR,
         "grid.color":         GRID_COLOR,
         "grid.alpha":         0.6,
         "legend.facecolor":   "#F5F5F5",
@@ -156,28 +181,27 @@ def fig1_baseline_fingerprint(cases):
     fig.patch.set_facecolor(BG_COLOR)
     ax.set_facecolor(BG_COLOR)
 
-    # Grid
+    # Grid rings (unlabeled — each axis is on its own scale; see disclosure below)
     ax.set_yticks([0.25, 0.5, 0.75, 1.0])
-    ax.set_yticklabels(["", "", "", ""], fontsize=6)
+    ax.set_yticklabels(["", "", "", ""])
     ax.set_ylim(0, 1.15)
-    # ax.set_ylim(0, 1.15)
 
     # Draw the shape
     ax.plot(angles_closed, normed_closed, color=COLORS[1], linewidth=2.5, zorder=3)
     ax.fill(angles_closed, normed_closed, color=COLORS[1], alpha=0.15, zorder=2)
 
-    # Vertex dots with value labels
-    for angle, norm_val, raw_val, label in zip(angles, normed, values, METRIC_LABELS):
-        ax.scatter(angle, norm_val, color=COLORS[1], s=60, zorder=4, edgecolors=TEXT_COLOR, linewidths=0.5)
-        # Raw value label just outside the point
-        offset = 0.12
-        ax.text(angle, norm_val + offset, f"{raw_val:.3f}",
-                ha="center", va="center", fontsize=8, fontweight="bold",
-                color=COLORS[1])
+    # Vertex dots with RAW value labels, offset outward so they survive downscaling
+    for angle, norm_val, raw_val in zip(angles, normed, values):
+        ax.scatter(angle, norm_val, color=COLORS[1], s=60, zorder=4,
+                   edgecolors=TEXT_COLOR, linewidths=0.5)
+        ax.text(angle, norm_val + 0.12, f"{raw_val:.3f}",
+                ha="center", va="center", fontsize=8.5, fontweight="bold",
+                color=TEXT_COLOR)
 
     # Axis labels
     ax.set_xticks(angles)
-    ax.set_xticklabels(METRIC_LABELS, fontsize=9, fontweight="bold")
+    ax.set_xticklabels(METRIC_LABELS, fontsize=9.5, fontweight="bold")
+    ax.tick_params(axis="x", pad=10)
 
     # Spokes
     for angle in angles:
@@ -186,12 +210,19 @@ def fig1_baseline_fingerprint(cases):
     ax.spines["polar"].set_color(SPINE_COLOR)
     ax.grid(color=GRID_COLOR, alpha=0.5)
 
-    fig.suptitle("Defensibility Fingerprint — Baseline Topology",
-                 fontsize=14, fontweight="bold", color=TEXT_COLOR, y=0.98)
-    ax.set_title(f"Case 1: {CASE_DESCRIPTIONS[1]}", fontsize=9, pad=20, color="#666666")
+    if EMBED_TITLES:
+        fig.suptitle("Defensibility Fingerprint — Baseline Topology",
+                     fontsize=14, fontweight="bold", color=TEXT_COLOR, y=1.03)
+
+    # Normalization disclosure — defuses the "why is it a balanced hexagon?" reviewer trap.
+    # Each axis is scaled to its own cross-case maximum; printed numbers are raw scores.
+    ax.text(0.5, -0.12,
+            "Radius normalized per axis (rim $=$ cross-case max); printed values are raw metric scores.",
+            transform=ax.transAxes, ha="center", va="top",
+            fontsize=8.5, color=MUTED_COLOR)
 
     _save_figure(fig, "fig1_baseline_fingerprint.png")
-    plt.show()
+    plt.close(fig)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -204,22 +235,18 @@ def fig2_five_fingerprints(cases):
     angles = np.linspace(0, 2 * np.pi, len(METRIC_KEYS), endpoint=False).tolist()
     angles_closed = angles + [angles[0]]
 
-    # 2 rows x 3 cols, near-square panels -> survives downscaling
     fig = plt.figure(figsize=(13, 9))
     fig.patch.set_facecolor(BG_COLOR)
-
-    short_labels = ["ATK", "SNK", "FRC", "STP", "VPX", "ADR"]
 
     for i, idx in enumerate(CASE_INDICES):
         if idx not in cases:
             continue
         case = cases[idx]
-        sg = case["safety_game"]
         values = _get_radar_values(case)
         normed = [v / m if m > 0 else 0 for v, m in zip(values, maxima)]
         normed_closed = normed + [normed[0]]
 
-        ax = fig.add_subplot(2, 3, i + 1, polar=True)   # <-- 2x3 grid
+        ax = fig.add_subplot(2, 3, i + 1, polar=True)
         ax.set_facecolor(BG_COLOR)
 
         ax.set_yticks([0.25, 0.5, 0.75, 1.0])
@@ -235,88 +262,98 @@ def fig2_five_fingerprints(cases):
                        edgecolors=TEXT_COLOR, linewidths=0.4)
 
         ax.set_xticks(angles)
-        ax.set_xticklabels(short_labels, fontsize=12, fontweight="bold")  # <-- 7 -> 12
-        ax.tick_params(axis='x', pad=8)                                   # breathing room
+        ax.set_xticklabels(METRIC_CODES, fontsize=12, fontweight="bold")
+        ax.tick_params(axis="x", pad=8)
 
         for angle in angles:
             ax.plot([angle, angle], [0, 1.0], color=SPINE_COLOR, linewidth=0.4, zorder=1)
 
         ax.spines["polar"].set_color(SPINE_COLOR)
         ax.grid(color=GRID_COLOR, alpha=0.4)
+
+        # Per-panel title STAYS — it identifies the panel (caption can't do that).
+        # Extra pad lifts it clear of the radar's top vertex labels (FRC/SNK).
+        # Charcoal, not case-colored: the radar fill below already carries the color,
+        # so colored text would be redundant and risks contrast/grayscale legibility.
         ax.set_title(f"Case {idx}: {CASE_DESCRIPTIONS[idx]}",
-                     fontsize=12, fontweight="bold", color=color, pad=14)  # desc in title
+                     fontsize=12, fontweight="bold", color=TEXT_COLOR, pad=22)
+        # |W| intentionally omitted here — it is fully reported in fig3 (decomposition),
+        # and the fingerprint communicates shape, not magnitude.
 
-        wr = sg.get("winning_region_size", "?")
-        wr_pct = sg.get("winning_region_pct", "?")
-        ax.text(0.5, -0.30, f"W = {wr} ({wr_pct}%)",
-                transform=ax.transAxes, ha="center", fontsize=10, color="#666666")
+    if EMBED_TITLES:
+        fig.suptitle("Defensibility Fingerprints — What-If Comparison",
+                     fontsize=16, fontweight="bold", color=TEXT_COLOR, y=0.99)
 
-    fig.suptitle("Defensibility Fingerprints — What-If Comparison",
-                 fontsize=16, fontweight="bold", color=TEXT_COLOR, y=0.98)
-
-    # 6th cell empty -> use it for the axis-key legend instead of a cramped footer
+    # 6th cell -> axis-key legend (bold mono codes + dark roman names)
     ax_leg = fig.add_subplot(2, 3, 6)
     ax_leg.axis("off")
-    key_lines = [
-        "ATK  Attackability", "SNK  Sinking Ratio", "FRC  Shield Friction",
-        "STP  Attractor Steepness", "VPX  Violation Proximity",
-        "ADR  Attacker Dominance",
-    ]
-    ax_leg.text(0.05, 0.92, "Axis key", fontsize=13, fontweight="bold",
+    ax_leg.text(0.05, 0.95, "Axis key", fontsize=14, fontweight="bold",
                 color=TEXT_COLOR, va="top")
-    ax_leg.text(0.05, 0.78, "\n".join(key_lines), fontsize=11,
-                color="#444444", va="top", linespacing=1.6)
+    key_pairs = [
+        ("ATK", "Attackability"),
+        ("SNK", "Sinking Ratio"),
+        ("FRC", "Shield Friction"),
+        ("STP", "Attractor Steepness"),
+        ("VPX", "Violation Proximity"),
+        ("ADR", "Attacker Dominance"),
+    ]
+    y0, dy = 0.78, 0.115
+    for r, (code, name) in enumerate(key_pairs):
+        yy = y0 - r * dy
+        ax_leg.text(0.05, yy, code, fontsize=12, fontweight="bold",
+                    color=TEXT_COLOR, va="top", family="monospace")
+        ax_leg.text(0.27, yy, name, fontsize=12, color=TEXT_COLOR, va="top")
 
-    plt.tight_layout(rect=[0, 0.0, 1, 0.94])
-    plt.subplots_adjust(hspace=0.55)
+    plt.tight_layout(rect=[0, 0.0, 1, 0.96 if EMBED_TITLES else 1.0])
+    plt.subplots_adjust(hspace=0.62)
     _save_figure(fig, "fig2_five_fingerprints.png", bbox_inches="tight")
-    plt.show()
+    plt.close(fig)
 
 
 # ═══════════════════════════════════════════════════════════
 #  FIGURE 3: STATE SPACE DECOMPOSITION — STACKED BARS
 # ═══════════════════════════════════════════════════════════
 def fig3_state_space_decomposition(cases):
-    """Horizontal stacked bars: Winning Region | Shell 3 | Shell 2 | Shell 1 (candidate states only)."""
+    """Horizontal stacked bars: Winning Region | Shell 3+ | Shell 2 | Shell 1
+    (candidate states only)."""
     apply_academic_style()
- 
-    # Sequential palette: safe (saturated) → danger (warm)
+
     ZONE_COLORS = {
-        "winning":   "#1B998B",   # teal — safe ground
-        "shell_1":   "#C75146",   # muted red — 1 step from death
+        "winning": "#1B998B",   # teal — safe ground
+        "shell_1": "#C75146",   # muted red — 1 step from death
     }
- 
+    shell_color_map = ["#C75146", "#E8A838", "#7ECBC0", "#A8DDD5", "#C4EBE5"]
+
     fig, ax = plt.subplots(figsize=(14, 4.5))
- 
+
     bar_height = 0.5
     y_positions = list(range(len(CASE_INDICES)))
- 
+
     for i, idx in enumerate(CASE_INDICES):
         if idx not in cases:
             continue
         sg = cases[idx]["safety_game"]
         initial_U = sg["initial_unsafe_size"]
-        candidates = sg["total_states"] - initial_U  # states that COULD have survived
- 
+        candidates = sg["total_states"] - initial_U   # states that COULD have survived
+
         winning = sg["winning_region_size"]
-        shells  = sg.get("attractor_shells", [])  # [S1, S2, S3, ...]
- 
+        shells = sg.get("attractor_shells", [])        # [S1, S2, S3, ...]
+
         # Build segments: winning, then shells reversed (S3, S2, S1)
         segments = [winning]
         shells_reversed = list(reversed(shells))
         segments.extend(shells_reversed)
- 
+
         seg_pct = [s / candidates * 100 for s in segments]
- 
-        # Colors: winning, then shells from buffer to danger
+
         n_shells = len(shells)
-        shell_color_map = ["#C75146", "#E8A838", "#7ECBC0", "#A8DDD5", "#C4EBE5"]
         shell_colors_reversed = []
         for j in range(n_shells):
-            shell_colors_reversed.append(shell_color_map[min(n_shells - 1 - j, len(shell_color_map) - 1)])
- 
+            shell_colors_reversed.append(
+                shell_color_map[min(n_shells - 1 - j, len(shell_color_map) - 1)]
+            )
         colors = [ZONE_COLORS["winning"]] + shell_colors_reversed
- 
+
         # Draw stacked horizontal bar
         left = 0
         for seg, col in zip(seg_pct, colors):
@@ -325,41 +362,47 @@ def fig3_state_space_decomposition(cases):
             if seg > 5:
                 is_dark = col in [ZONE_COLORS["winning"], "#C75146"]
                 ax.text(left + seg / 2, i, f"{seg:.1f}%",
-                        ha="center", va="center", fontsize=11,
+                        ha="center", va="center", fontsize=13,
                         color="white" if is_dark else TEXT_COLOR)
             left += seg
- 
-        # Annotations to the right
-        ax.text(101, i, f"|W| = {winning:,}  ({winning/(candidates+initial_U)*100:.1f}%)",
-                ha="left", va="center", fontsize=9, color=TEXT_COLOR)
- 
-    y_labels = [f"Case {idx}" for idx in CASE_INDICES if idx in cases]
+        # |W| totals now live in the y-axis labels — keeps the x-axis honest at 100%.
+
+    # Two-line y labels: case id + |W| total (pulled straight from JSON fields)
+    y_labels = []
+    for idx in CASE_INDICES:
+        if idx not in cases:
+            continue
+        sg = cases[idx]["safety_game"]
+        w, tot = sg["winning_region_size"], sg["total_states"]
+        y_labels.append(f"Case {idx}\n|W| = {w:,}  ({w / tot * 100:.1f}%)")
+
     ax.set_yticks(y_positions[:len(y_labels)])
-    ax.set_yticklabels(y_labels, fontsize=10)
- 
-    ax.set_xlabel("Candidate States (%)", fontsize=10, labelpad=8)
-    ax.set_xlim(0, 118)
+    ax.set_yticklabels(y_labels, fontsize=11)
+
+    ax.set_xlabel("Candidate States (%)", fontsize=11, labelpad=8)
+    ax.set_xlim(0, 100)
+    ax.set_xticks([0, 20, 40, 60, 80, 100])
     ax.invert_yaxis()
- 
+
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
- 
-    from matplotlib.patches import Patch
+
     legend_elements = [
         Patch(facecolor=ZONE_COLORS["winning"], edgecolor="white", label="Winning Region"),
-        Patch(facecolor="#7ECBC0",               edgecolor="white", label="Shell 3+"),
-        Patch(facecolor="#E8A838",               edgecolor="white", label="Shell 2"),
-        Patch(facecolor=ZONE_COLORS["shell_1"],  edgecolor="white", label="Shell 1"),
+        Patch(facecolor="#7ECBC0",              edgecolor="white", label="Shell 3+"),
+        Patch(facecolor="#E8A838",              edgecolor="white", label="Shell 2"),
+        Patch(facecolor=ZONE_COLORS["shell_1"], edgecolor="white", label="Shell 1"),
     ]
-    ax.legend(handles=legend_elements, loc="upper right", fontsize=8,
+    ax.legend(handles=legend_elements, loc="upper right", fontsize=9,
               framealpha=0.9, ncol=4, handlelength=1.2, handletextpad=0.4)
- 
-    fig.suptitle("Winning State Space Decomposition",
-                 fontsize=13, fontweight="bold", color=TEXT_COLOR)
- 
+
+    if EMBED_TITLES:
+        fig.suptitle("Winning State Space Decomposition",
+                     fontsize=13, fontweight="bold", color=TEXT_COLOR)
+
     plt.tight_layout()
     _save_figure(fig, "fig3_state_decomposition.png")
-    plt.show()
+    plt.close(fig)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -368,81 +411,86 @@ def fig3_state_space_decomposition(cases):
 def fig4_dominance_comparison(cases):
     """Side-by-side box plots of per-run L200 dominance ratios with CIs."""
     apply_academic_style()
+    np.random.seed(RNG_SEED)   # reproducible jitter -> identical figure every rebuild
 
     fig, ax = plt.subplots(figsize=(12, 6))
     fig.patch.set_facecolor(BG_COLOR)
     ax.set_facecolor(BG_COLOR)
 
-    positions = []
-    labels = []
-    all_data = []
+    positions, labels = [], []
 
     for i, idx in enumerate(CASE_INDICES):
         if idx not in cases:
             continue
-        per_run = cases[idx]["results"]["defender_dominance_pct"]["per_run"]
-        mean = cases[idx]["results"]["defender_dominance_pct"]["mean"]
-        ci_low = cases[idx]["results"]["defender_dominance_pct"]["ci_low"]
-        ci_high = cases[idx]["results"]["defender_dominance_pct"]["ci_high"]
+        dr = cases[idx]["results"]["defender_dominance_pct"]
+        per_run = dr["per_run"]
+        mean    = dr["mean"]
+        ci_low  = dr["ci_low"]
+        ci_high = dr["ci_high"]
 
         pos = i
         positions.append(pos)
         labels.append(f"Case {idx}")
-        all_data.append(per_run)
-
         color = COLORS[idx]
 
         # Box plot
-        bp = ax.boxplot([per_run], positions=[pos], widths=0.45, patch_artist=True,
-                        showfliers=False,
-                        boxprops=dict(facecolor=color, alpha=0.25, edgecolor=color, linewidth=1.5),
-                        medianprops=dict(color=TEXT_COLOR, linewidth=2),
-                        whiskerprops=dict(color=color, linewidth=1.2),
-                        capprops=dict(color=color, linewidth=1.2))
+        ax.boxplot([per_run], positions=[pos], widths=0.45, patch_artist=True,
+                   showfliers=False,
+                   boxprops=dict(facecolor=color, alpha=0.25, edgecolor=color, linewidth=1.5),
+                   medianprops=dict(color=TEXT_COLOR, linewidth=2),
+                   whiskerprops=dict(color=color, linewidth=1.2),
+                   capprops=dict(color=color, linewidth=1.2))
 
         # Individual run points (jittered)
         jitter = np.random.normal(0, 0.04, size=len(per_run))
-        ax.scatter([pos] * len(per_run) + jitter, per_run,
+        ax.scatter(np.full(len(per_run), pos) + jitter, per_run,
                    color=color, s=50, zorder=5, alpha=0.85,
                    edgecolors=TEXT_COLOR, linewidths=0.4)
 
-        # CI bar
-        ax.plot([pos + 0.28, pos + 0.28], [ci_low, ci_high],
-                color=color, linewidth=3, solid_capstyle="round", alpha=0.7)
-        ax.scatter([pos + 0.28], [mean], color=TEXT_COLOR, s=25, zorder=6, marker="_", linewidths=2)
+        # 95% CI bar — widened + larger mean tick so it reads as deliberate, not an artifact
+        ax.plot([pos + 0.30, pos + 0.30], [ci_low, ci_high],
+                color=color, linewidth=4.5, solid_capstyle="round", alpha=0.75)
+        ax.scatter([pos + 0.30], [mean], color=TEXT_COLOR, s=55, zorder=6,
+                   marker="_", linewidths=2.2)
 
-        # Mean annotation
-        ax.text(pos, max(per_run) + 1.5, f"{mean:.1f}%",
-                ha="center", va="bottom", fontsize=9, fontweight="bold", color=color)
+        # Mean annotation — lowered to sit just above the data. Charcoal, not case-colored:
+        # the box below carries the color; colored text risks contrast/grayscale legibility.
+        ax.text(pos, max(per_run) + 0.8, f"{mean:.1f}%",
+                ha="center", va="bottom", fontsize=10, fontweight="bold", color=TEXT_COLOR)
 
-    # 50% reference line
+    # 50% reference line — line stays light, label darkened + enlarged
     ax.axhline(50, color="#999999", linestyle="--", linewidth=0.8, alpha=0.7, zorder=1)
-    ax.text(len(positions) - 0.5, 50.5, "50% — Even Split", fontsize=7, color="#999999", ha="right")
+    ax.text(len(positions) - 0.5, 50.6, "50% — Even Split",
+            fontsize=9, color=MUTED_COLOR, ha="right")
 
     ax.set_xticks(positions)
-    ax.set_xticklabels(labels, fontsize=10, fontweight="bold")
-    ax.set_ylabel("Defender Dominance Ratio (L200) %", fontsize=10)
+    ax.set_xticklabels(labels, fontsize=12, fontweight="bold")
+    ax.set_ylabel("Defender Dominance Ratio (L200) %", fontsize=11)
 
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
 
-    # Light horizontal grid for readability
     ax.yaxis.grid(True, color=GRID_COLOR, linewidth=0.5, alpha=0.7)
     ax.set_axisbelow(True)
 
-    # Case descriptions as secondary x-labels
+    # Case descriptions as secondary x-labels — upright, dark, larger
+    # Case descriptions as secondary x-labels — upright, dark, larger.
+    # Pushed to a 4.0-unit gap so they sit clear of the bold "Case N" tick labels.
+    # To collapse to a SINGLE label instead, delete this loop and fold the description
+    # into `labels` above (e.g. f"Case {idx}\n{CASE_DESCRIPTIONS[idx]}").
+    ymin = ax.get_ylim()[0]
     for i, idx in enumerate(CASE_INDICES):
         if idx in cases:
-            ax.text(i, ax.get_ylim()[0] - 2.5,
-                    CASE_DESCRIPTIONS[idx],
-                    ha="center", va="top", fontsize=7, color="#666666", style="italic")
+            ax.text(i, ymin - 4.0, CASE_DESCRIPTIONS[idx],
+                    ha="center", va="top", fontsize=10, color=TEXT_COLOR)
 
-    fig.suptitle("Defender Dominance at Equilibrium — What-If Comparison",
-                 fontsize=13, fontweight="bold", color=TEXT_COLOR)
+    if EMBED_TITLES:
+        fig.suptitle("Defender Dominance at Equilibrium — What-If Comparison",
+                     fontsize=13, fontweight="bold", color=TEXT_COLOR)
 
     plt.tight_layout()
     _save_figure(fig, "fig4_dominance_comparison.png")
-    plt.show()
+    plt.close(fig)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -450,7 +498,9 @@ def fig4_dominance_comparison(cases):
 # ═══════════════════════════════════════════════════════════
 def print_comparison_table(cases):
     """Print a formatted comparison table of all metrics across cases."""
-    header = f"{'Case':>6} | {'Description':<35} | {'ATK':>7} | {'SNK':>7} | {'FRC':>7} | {'STP':>7} | {'MSV':>7} | {'|W|':>8} | {'W%':>6} | {'DDR%':>8} | {'DDR CI':>18}"
+    header = (f"{'Case':>6} | {'Description':<35} | {'ATK':>7} | {'SNK':>7} | "
+              f"{'FRC':>7} | {'STP':>7} | {'MSV':>7} | {'|W|':>8} | {'W%':>6} | "
+              f"{'DDR%':>8} | {'DDR CI':>18}")
     sep = "-" * len(header)
     print(f"\n{sep}")
     print("WHAT-IF COMPARISON — TOPOLOGY DEFENSIBILITY METRICS")
@@ -481,7 +531,6 @@ def print_comparison_table(cases):
         print(row)
     print(sep)
 
-    # Save to file
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     table_path = os.path.join(OUTPUT_DIR, "comparison_table.txt")
     with open(table_path, "w") as f:
@@ -497,7 +546,8 @@ def print_comparison_table(cases):
 #  HELPERS
 # ═══════════════════════════════════════════════════════════
 def _compute_radar_maxima(cases):
-    """Compute per-axis max across all cases for consistent radar scaling."""
+    """Per-axis max across all cases for consistent radar scaling.
+    Pure function of the loaded data — no constants injected."""
     maxima = [0.0] * len(METRIC_KEYS)
     for idx in CASE_INDICES:
         if idx not in cases:
@@ -505,7 +555,7 @@ def _compute_radar_maxima(cases):
         vals = _get_radar_values(cases[idx])
         for j, v in enumerate(vals):
             maxima[j] = max(maxima[j], v)
-    # Ensure no zero maxima (avoid div/0), pad by 10% for visual breathing room
+    # Avoid zero maxima (div/0); pad 10% for visual breathing room.
     return [m * 1.1 if m > 0 else 1.0 for m in maxima]
 
 
