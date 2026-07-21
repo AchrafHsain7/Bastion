@@ -2,6 +2,8 @@ from library import *
 
 
 # Attack from gateway to DB, FULLY CONNECTED
+BASTION_IDX = 2
+CASE_DESCRIPTION = "Fully Connected"
 
 
 # 1 means attack path exists from col idx host to row idx host

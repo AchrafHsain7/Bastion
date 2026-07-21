@@ -2,6 +2,8 @@ from library import *
 
 
 # ONLY 2 HOSTS WORKING AT ALL TIME FOR DEFENDER
+BASTION_IDX = 4
+CASE_DESCRIPTION = "Min 2 Working Hosts"
 
 
 # 1 means attack path exists from col idx host to row idx host

@@ -2,6 +2,8 @@ from library import *
 
 
 # Attacker alowed infinite destroy
+BASTION_IDX = 3
+CASE_DESCRIPTION = "Infinite Destroys"
 
 
 # 1 means attack path exists from col idx host to row idx host

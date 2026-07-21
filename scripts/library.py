@@ -236,17 +236,19 @@ class NetworkAnalyzer:
         print("Attr0", len(attractor0))
         attractor_sizes.append(len(attractor0))
         attractor_old = attractor0
+        in_attractor_old = self.in_attractor.copy()
         idx = 1
         while True:
             attractor = attractor_old.copy()
+            in_attractor_old = self.in_attractor.copy()
             for i, s in enumerate(tqdm(self.mdp_product)):
-                if self.in_attractor[i]==1: continue
+                if in_attractor_old[i]==1: continue
                 s = tuple(s)
                 if s[-3] == "A":
                     add = False
                     # if one next successor LEGAL vertext is in attractor then add this one as well
                     for j, next_s in enumerate(self.successors[s]):
-                        if self.in_attractor[self.map_idx[next_s]]==1 and next_s[-1]!="viol":
+                        if in_attractor_old[self.map_idx[next_s]]==1 and next_s[-1]!="viol":
                             add = True
                             break
                     if add and self.in_attractor[i]==0:
@@ -257,12 +259,13 @@ class NetworkAnalyzer:
                     # if all next states in attractor then add this state to attractor
                     add = True
                     for next_s in self.successors[s]:
-                        if self.in_attractor[self.map_idx[next_s]]==0: # not in attractor
+                        if in_attractor_old[self.map_idx[next_s]]==0: # not in attractor
                             add = False
                             break
                     if add and self.in_attractor[i]==0:
                         attractor.append(s)
                         self.in_attractor[i] = 1
+            
             
             print(f"===> Attr{idx}=", len(attractor), end="\n\n")
             attractor_sizes.append(len(attractor))
@@ -332,17 +335,42 @@ class NetworkAnalyzer:
     def sinked_states(self):
         return  (self.attractor_sizes[-1] - self.attractor_sizes[0])/(len(self.mdp_product) - self.attractor_sizes[0]) #initial winning region
 
+    # get the shielded reachable set
+    def shielded_reachable(self, state0=None):
+        if state0 is None:
+            state0 = self.mdp.state0
+        self.automatonD.reset()
+        self.automatonA.reset()
+        s0 = tuple([*state0, self.automatonD.state, self.automatonA.state])
+
+        if s0 not in self.safe_actions:
+            raise KeyError(f"initial product state not in the game graph: {s0}")
+
+        seen, stack = {s0}, [s0]
+        while stack:
+            v = stack.pop()
+            for i in self.safe_actions[v]:
+                nx = self.successors[v][i]
+                if nx not in seen:
+                    seen.add(nx)
+                    stack.append(nx)
+        self.reachable = seen
+        return seen
+
     #LB, if friction high then attacker is twisting the hand of defender and not giving him a lot of room, if low then defender has many possible actions near the boundary
-    def shield_friction(self):
-        friction = 0
-        total = 0
-        for i, s in enumerate(self.safe_actions):
-            actions = self.safe_actions[s]
-            if s[-3]=="D" and self.in_attractor[i] == 0: 
-                total += 25 #total number of actions in safe state
-                if len(actions)<25: #some actions are masked so in boundary of attractor
-                    friction += (25 - len(actions)) # how many actions were masked
-        return friction/total
+    def shield_friction(self, domain):
+        """Fraction of defender actions the shield blocks, averaged over `domain`.
+        `domain` must be given explicitly: the value depends strongly on it
+        (full winning region 0.6131, shielded-reachable 0.2820 on the reference
+        configuration)."""
+        n_actions = len(self.actionsD) * self.num_hosts
+        blocked = total = 0
+        for s in domain:
+            if s[-3] != "D":
+                continue
+            total += n_actions
+            blocked += n_actions - len(self.safe_actions[s])
+        return blocked / total if total else float("nan")
 
     # Returns a value between [0, 1]. High (near 1) = Cliff (Dangerous), Low (near 0) = Smooth slope
     def attractor_steepness(self):
@@ -378,9 +406,10 @@ class NetworkAnalyzer:
             depth += i*shell_size
         return depth/(self.attractor_sizes[-1] - self.attractor_sizes[0])
 
-    def compute_metrics(self, discount=0.99):
-        return {"attackability": self.attackability(discount), "sinking":self.sinked_states(), "friction":self.shield_friction(),
-                 "steepness":self.attractor_steepness(), "mean_steps":self.mean_attractor_depth()}
+    def compute_metrics(self):
+        shield_domain = self.shielded_reachable()
+        return {"sinking":self.sinked_states(), "friction":self.shield_friction(shield_domain),
+                 "steepness":self.attractor_steepness()}
 
 
 

@@ -5,9 +5,8 @@ import os
 import json
 from datetime import datetime
 
-from bastion5 import *
-BASTION_IDX = 5
-CASE_DESCRIPTION = "DB BYPASS ADDED + Double edges"
+from bastion1 import *
+
 
 RESULTS_DIR = "../results"
 
@@ -99,7 +98,8 @@ if __name__ == "__main__":
 
     analyzer.compute_safe_actions()
 
-    metrics = analyzer.compute_metrics(0.95)
+    metrics = analyzer.compute_metrics()
+    print(metrics)
 
     shells = []
     for k in range(1, len(attractor_sizes)):
@@ -121,11 +121,9 @@ if __name__ == "__main__":
         "winning_region_size":     winning_region,
         "winning_region_pct":      round(winning_region / total_states * 100, 2),
         "attractor_shells":        shells,
-        "attackability":           metrics["attackability"],
         "sinking_ratio":           metrics["sinking"],
         "shield_friction":         metrics["friction"],
         "attractor_steepness":     metrics["steepness"],
-        "mean_steps_to_violation": metrics["mean_steps"],
     }
 
 

@@ -2,6 +2,8 @@ from library import *
 
 
 # DEFAULT
+BASTION_IDX = 1
+CASE_DESCRIPTION = "Default Case"
 
 
 # 1 means attack path exists from col idx host to row idx host

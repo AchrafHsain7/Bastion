@@ -2,7 +2,8 @@ from library import *
 
 
 # FINALLY REMOVE THE VPN BYPASS
-
+BASTION_IDX = 5
+CASE_DESCRIPTION = "No VPN bypass"
 
 # 1 means attack path exists from col idx host to row idx host
 topology = [[1, 0, 0, 0, 0], 
