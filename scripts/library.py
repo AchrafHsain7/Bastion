@@ -357,59 +357,55 @@ class NetworkAnalyzer:
         self.reachable = seen
         return seen
 
-    #LB, if friction high then attacker is twisting the hand of defender and not giving him a lot of room, if low then defender has many possible actions near the boundary
-    def shield_friction(self, domain):
-        """Fraction of defender actions the shield blocks, averaged over `domain`.
+    def winning_fraction(self):
+        """WIN = |W| / (|S_x| - |U|): of the non-violating states, the fraction
+        from which the defender can guarantee safety. Larger = more defensible."""
+        total = len(self.mdp_product)
+        U = self.attractor_sizes[0]
+        return len(self.winning_region) / (total - U)
+
+    def shell_steepness(self):
+        """SEP = H / ln(k_max): normalized entropy of the shell (forcing-distance)
+        distribution. Larger = graded boundary; near 0 = cliff. Larger is the
+        more defensible reading, since concentration in a defensibility game
+        occurs at the edge (shell 1).
+        we report STP = 1 - SEP
+        """
+        import math
+        total = self.attractor_sizes[-1] - self.attractor_sizes[0]
+        num_shells = len(self.attractor_sizes) - 1
+        if total == 0 or num_shells <= 1:
+            return 1.0                      # single shell / no mass = cliff
+        entropy = 0.0
+        for i in range(1, len(self.attractor_sizes)):
+            shell = self.attractor_sizes[i] - self.attractor_sizes[i - 1]
+            if shell > 0:
+                p_i = shell / total
+                entropy -= p_i * math.log(p_i)
+        return 1 - entropy / math.log(num_shells)
+
+    def shield_latitude(self, domain):
+        """SLT = sum|Safe| / sum|Act_D x V|: mean fraction of defender actions the
+        shield PERMITS, averaged over `domain`. Larger = more room to act.
         `domain` must be given explicitly: the value depends strongly on it
-        (full winning region 0.6131, shielded-reachable 0.2820 on the reference
-        configuration)."""
+        (full winning region 0.387, shielded-reachable 0.718 on the reference
+        configuration).
+        
+        """
         n_actions = len(self.actionsD) * self.num_hosts
-        blocked = total = 0
+        permitted = total = 0
         for s in domain:
             if s[-3] != "D":
                 continue
             total += n_actions
-            blocked += n_actions - len(self.safe_actions[s])
-        return blocked / total if total else float("nan")
-
-    # Returns a value between [0, 1]. High (near 1) = Cliff (Dangerous), Low (near 0) = Smooth slope
-    def attractor_steepness(self):
-        import math
-        total_winning_states = self.attractor_sizes[-1] - self.attractor_sizes[0]
-        if total_winning_states == 0: 
-            return 0
-        
-        entropy = 0
-        for i in range(1, len(self.attractor_sizes)):
-            shell_size = self.attractor_sizes[i] - self.attractor_sizes[i-1]
-            if shell_size > 0:
-                p_i = shell_size / total_winning_states
-                entropy -= p_i * math.log(p_i)
-                
-        num_shells = len(self.attractor_sizes) - 1
-        if num_shells <= 1: 
-            return 1.0 # Absolute cliff, only one shell exists
-        
-        # Normalize by maximum possible entropy for this number of shells
-        max_entropy = math.log(num_shells)
-        normalized_entropy = entropy / max_entropy 
-        
-        # Invert so that High = Concentrated (Cliff), Low = Spread out (Smooth)
-        cliff_index = 1.0 - normalized_entropy
-        return cliff_index
-
-    # Average number of steps needed to fall into violation
-    def mean_attractor_depth(self):
-        depth = 0
-        for i in range(1, len(self.attractor_sizes)):
-            shell_size = self.attractor_sizes[i] - self.attractor_sizes[i-1]
-            depth += i*shell_size
-        return depth/(self.attractor_sizes[-1] - self.attractor_sizes[0])
+            permitted += len(self.safe_actions[s])
+        return permitted / total if total else float("nan")
 
     def compute_metrics(self):
         shield_domain = self.shielded_reachable()
-        return {"sinking":self.sinked_states(), "friction":self.shield_friction(shield_domain),
-                 "steepness":self.attractor_steepness()}
+        return {"winning": self.winning_fraction(),
+                "steepness":    self.shell_steepness(),
+                "latitude":  self.shield_latitude(shield_domain)}
 
 
 

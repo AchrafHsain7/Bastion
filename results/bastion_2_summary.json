@@ -1,7 +1,7 @@
 {
   "bastion_idx": 2,
-  "case_description": "DB BYPASS ADDED + Double edges",
-  "timestamp": "2026-04-30T19:41:02.972307",
+  "case_description": "Fully Connected",
+  "timestamp": "2026-07-22T19:59:24.626806",
   "config": {
     "n_runs": 10,
     "simulation_episodes": 3000,
@@ -72,14 +72,13 @@
     "winning_region_size": 23310,
     "winning_region_pct": 15.54,
     "attractor_shells": [
-      23562,
-      2552,
-      576
+      19418,
+      6696,
+      240,
+      336
     ],
-    "attackability": 1.0802628914628916,
-    "sinking_ratio": 0.5338,
-    "shield_friction": 0.6181423804226919,
-    "attractor_steepness": 0.6201760034907551,
-    "mean_steps_to_violation": 1.1387785687523417
+    "winning_fraction": 0.4662,
+    "shell_steepness": 0.512531160533876,
+    "shield_latitude": 0.7066542404473439
   }
 }

@@ -121,10 +121,11 @@ if __name__ == "__main__":
         "winning_region_size":     winning_region,
         "winning_region_pct":      round(winning_region / total_states * 100, 2),
         "attractor_shells":        shells,
-        "sinking_ratio":           metrics["sinking"],
-        "shield_friction":         metrics["friction"],
-        "attractor_steepness":     metrics["steepness"],
+        "winning_fraction":           metrics["winning"],
+        "shell_steepness":         metrics["steepness"],
+        "shield_latitude":     metrics["latitude"],
     }
+    
 
 
     # s = ('I', 'X', 'I', 'C', 'C', 'D', ('q0', 'safe'), 'q2')
@@ -188,7 +189,7 @@ if __name__ == "__main__":
             #     agent.debug = True 
             #     DEBUG = True
         
-        metrics = analyzer.compute_metrics(0.95)
+        metrics = analyzer.compute_metrics()
         print(metrics)
         
         # Per-run summaries (using last 200 episodes)

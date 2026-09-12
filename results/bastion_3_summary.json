@@ -1,7 +1,7 @@
 {
   "bastion_idx": 3,
-  "case_description": "DB BYPASS ADDED + Double edges",
-  "timestamp": "2026-04-30T19:41:30.499449",
+  "case_description": "Infinite Destroys",
+  "timestamp": "2026-07-22T19:59:38.677800",
   "config": {
     "n_runs": 10,
     "simulation_episodes": 3000,
@@ -72,14 +72,13 @@
     "winning_region_size": 20526,
     "winning_region_pct": 13.68,
     "attractor_shells": [
-      25226,
-      3384,
-      864
+      20258,
+      8352,
+      336,
+      528
     ],
-    "attackability": 1.3524082626912208,
-    "sinking_ratio": 0.58948,
-    "shield_friction": 0.639731971920868,
-    "attractor_steepness": 0.5583712848487938,
-    "mean_steps_to_violation": 1.173440998846441
+    "winning_fraction": 0.41052,
+    "shell_steepness": 0.4675707261096369,
+    "shield_latitude": 0.4625061425061425
   }
 }

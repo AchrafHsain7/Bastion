@@ -16,8 +16,15 @@ Run AFTER all 5 case studies have completed.
 JAIR polish (vs. the draft figures):
     * EMBED_TITLES=False -> embedded titles stripped; the LaTeX \\caption{} carries them.
     * All secondary text darkened from wispy gray to charcoal (survives B/W print).
-    * fig1: per-axis normalization disclosed in-figure (kills the "balanced hexagon" trap).
+    * fig1/fig2: axis scaling is a toggle, ABSOLUTE_AXES (default True). All four
+      metrics are bounded in [0,1] by construction, so absolute mode needs no
+      rescaling and yields portable fingerprints; relative mode restores the
+      cross-case min-max normalization for maximum within-set separation.
     * fig2: |W| subtext enlarged/bolded/darkened + thousands separators; bold axis key.
+    * fig1/fig2: four defender-oriented axes (WIN, SEP, DDR, SLT), larger = more
+      defensible. Static layer {WIN, SEP, SLT} + adaptive layer {DDR}. Earlier
+      Violation Proximity removed as algebraically derived / restated; see the
+      metric review. fig3 and fig4 are unchanged.
     * fig3: x-axis capped at 100% (no dead space); |W| totals moved into the y labels.
     * fig4: case captions upright+dark, reference label darkened, CI bar made deliberate;
             jitter seeded so the figure is reproducible across rebuilds.
@@ -28,12 +35,13 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 
 # ═══════════════════════════════════════════════════════════
 #  CONFIG
 # ═══════════════════════════════════════════════════════════
 RESULTS_DIR = "../results"
-OUTPUT_DIR  = "../results/paper_figures"
+OUTPUT_DIR  = "../paper_results"
 CASE_INDICES = [1, 2, 3, 4, 5]
 
 # Reproducible jitter for the dominance swarm (fig4). Seed -> identical figure every build.
@@ -67,45 +75,61 @@ SPINE_COLOR  = "#BDBDBD"
 # Flip to True for slides / talks where a self-contained title helps.
 EMBED_TITLES = False
 
-# Radar axis labels (full names, single radar)
+# Fingerprint radius scaling.
+#   True  — ABSOLUTE. All four axes are bounded in [0,1] by construction, so the
+#           rim is 1 on every axis and no rescaling is applied. A fingerprint is
+#           then portable: it can be read alone and compared with one produced by
+#           an independent study. Cost: configurations occupying a narrow band of
+#           the space look similar, because they are.
+#   False — RELATIVE. Each axis is rescaled to its own cross-case maximum (padded
+#           10%). Maximises visual separation within one comparison set, but the
+#           figure is meaningless in isolation and cannot be overlaid on another
+#           comparison set.
+# Captions must match this setting; see CAPTION NOTE at the foot of this file.
+ABSOLUTE_AXES = True
+
+# ── Fingerprint axes ──
+# Four defender-oriented axes, all in [0,1], LARGER = MORE DEFENSIBLE.
+#   Static layer  (functionals of the solved game: attractor + shield)
+#     WIN  Winning Fraction   |W| / (|S_x| - |U|)
+#     SEP  Shell Steepness    1 - H / ln(k_max)     (normalized entropy deficit)
+#     SLT  Shield Latitude    sum|Safe| / sum|Act_D x V|   over shielded-reachable
+#   Adaptive layer (functional of learned adaptive play)
+#     DDR  Defender Dominance mean clean-host fraction
+#
+# AXIS ORDER IS DELIBERATE. On a 4-spoke radar the opposite pairs are (0,2) and
+# (1,3). WIN sits opposite DDR (static state-mass vs. adaptive outcome) and
+# SEP opposite SLT (the two static metrics that load on PC2 with opposite sign).
 METRIC_LABELS = [
-    "Attackability",
-    "Sinking\nRatio",
-    "Shield\nFriction",
-    "Attractor\nSteepness",
-    "Violation\nProximity",
-    "Attacker\nDominance",
+    "Winning\nFraction",
+    "Shell\nSteepness",
+    "Defender\nDominance",
+    "Shield\nLatitude",
 ]
 # Short axis codes (small multiples)
-METRIC_CODES = ["ATK", "SNK", "FRC", "STP", "VPX", "ADR"]
+METRIC_CODES = ["WIN", "STP", "DDR", "SLT"]
 METRIC_KEYS = [
-    "attackability",
-    "sinking_ratio",
-    "shield_friction",
-    "attractor_steepness",
-    "mean_steps_to_violation",
-    "attacker_dominance",
+    "winning_fraction",
+    "shell_steepness",
+    "defender_dominance",
+    "shield_latitude",
 ]
-# All axes: higher = more dangerous. MSV is inverted (1/(MSV-1)) on the radar only,
-# so that "more steps to violation" reads as LOWER proximity. The printed VPX number
-# is therefore the proximity SCORE, not a step count — note this in the caption.
-INVERT_ON_RADAR = {"mean_steps_to_violation"}
 
 
 def _get_radar_values(case_dict):
-    """Extract radar values from a full case dict. All axes: higher = worse.
-    5 come from safety_game, 1 is derived from MARL results (attacker dominance).
-    Every quantity is pulled straight from the JSON — no defaults invented."""
+    """Extract radar values from a full case dict. All axes: higher = MORE
+    DEFENSIBLE. Three come from safety_game (static layer); one is the mean
+    defender dominance from the MARL results (adaptive layer). Every quantity
+    is pulled straight from the JSON — no defaults invented. Shield latitude is
+    computed by the analyzer over the shielded-reachable domain; state the
+    domain in the caption."""
     sg = case_dict["safety_game"]
     vals = []
     for k in METRIC_KEYS:
-        if k == "attacker_dominance":
-            ddr = case_dict["results"]["defender_dominance_pct"]["mean"]
-            v = 1.0 - (ddr / 100.0)
+        if k == "defender_dominance":
+            v = case_dict["results"]["defender_dominance_pct"]["mean"] / 100.0
         else:
             v = sg[k]
-            if k in INVERT_ON_RADAR:
-                v = 1.0 / max(v - 1.0, 0.01)  # strip the minimum, avoid div/0 at MSV=1.0
         vals.append(v)
     return vals
 
@@ -128,6 +152,32 @@ def load_all_cases():
         else:
             print(f"WARNING: {path} not found — skipping case {idx}")
     return cases
+
+
+def load_case_episodes(idx):
+    """Per-episode trajectories for one case, written by main.py as
+    bastion_{idx}_episodes.npz. Arrays are (n_runs, n_episodes):
+        clean_perc  per-episode mean clean-host fraction, in [0,1]
+        reward_D    per-episode mean defender reward
+        reward_A    per-episode mean attacker reward
+    Only clean_perc is used by fig5. It is the quantity DDR averages, so the
+    figure plots the integrand rather than a derived score."""
+    path = os.path.join(RESULTS_DIR, f"bastion_{idx}_episodes.npz")
+    with np.load(path) as z:
+        return {k: z[k] for k in z.files}
+
+
+def load_all_episodes():
+    """Same contract as load_all_cases: warn and skip rather than fail, so the
+    other four figures still build if the .npz files are absent."""
+    eps = {}
+    for idx in CASE_INDICES:
+        path = os.path.join(RESULTS_DIR, f"bastion_{idx}_episodes.npz")
+        if os.path.exists(path):
+            eps[idx] = load_case_episodes(idx)
+        else:
+            print(f"WARNING: {path} not found — skipping case {idx} in fig5")
+    return eps
 
 
 # ═══════════════════════════════════════════════════════════
@@ -170,7 +220,7 @@ def fig1_baseline_fingerprint(cases):
     case = cases[1]
 
     values = _get_radar_values(case)
-    maxima = _compute_radar_maxima(cases)
+    maxima = _radar_maxima(cases)
     normed = [v / m if m > 0 else 0 for v, m in zip(values, maxima)]
 
     angles = np.linspace(0, 2 * np.pi, len(METRIC_KEYS), endpoint=False).tolist()
@@ -181,10 +231,17 @@ def fig1_baseline_fingerprint(cases):
     fig.patch.set_facecolor(BG_COLOR)
     ax.set_facecolor(BG_COLOR)
 
-    # Grid rings (unlabeled — each axis is on its own scale; see disclosure below)
+    # Absolute mode: rings carry real values, every axis shares the [0,1] scale.
+    # Relative mode: rings are unlabeled — each axis is on its own scale.
     ax.set_yticks([0.25, 0.5, 0.75, 1.0])
-    ax.set_yticklabels(["", "", "", ""])
-    ax.set_ylim(0, 1.15)
+    if ABSOLUTE_AXES:
+        ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"],
+                           fontsize=7.5, color=MUTED_COLOR)
+        ax.set_rlabel_position(22.5)      # between spokes, clear of the shape
+        ax.set_ylim(0, 1.12)
+    else:
+        ax.set_yticklabels(["", "", "", ""])
+        ax.set_ylim(0, 1.15)
 
     # Draw the shape
     ax.plot(angles_closed, normed_closed, color=COLORS[1], linewidth=2.5, zorder=3)
@@ -194,7 +251,7 @@ def fig1_baseline_fingerprint(cases):
     for angle, norm_val, raw_val in zip(angles, normed, values):
         ax.scatter(angle, norm_val, color=COLORS[1], s=60, zorder=4,
                    edgecolors=TEXT_COLOR, linewidths=0.5)
-        ax.text(angle, norm_val + 0.12, f"{raw_val:.3f}",
+        ax.text(angle, min(norm_val + 0.10, 1.08), f"{raw_val:.3f}",
                 ha="center", va="center", fontsize=8.5, fontweight="bold",
                 color=TEXT_COLOR)
 
@@ -216,8 +273,8 @@ def fig1_baseline_fingerprint(cases):
 
     # Normalization disclosure — defuses the "why is it a balanced hexagon?" reviewer trap.
     # Each axis is scaled to its own cross-case maximum; printed numbers are raw scores.
-    ax.text(0.5, -0.12,
-            "Radius normalized per axis (rim $=$ cross-case max); printed values are raw metric scores.",
+    disclosure = "Larger shape $=$ more defensible"
+    ax.text(0.5, -0.12, disclosure,
             transform=ax.transAxes, ha="center", va="top",
             fontsize=8.5, color=MUTED_COLOR)
 
@@ -231,7 +288,7 @@ def fig1_baseline_fingerprint(cases):
 def fig2_five_fingerprints(cases):
     """5 radar charts as a 2x3 grid — readable at single-column width."""
     apply_academic_style()
-    maxima = _compute_radar_maxima(cases)
+    maxima = _radar_maxima(cases)
     angles = np.linspace(0, 2 * np.pi, len(METRIC_KEYS), endpoint=False).tolist()
     angles_closed = angles + [angles[0]]
 
@@ -250,8 +307,13 @@ def fig2_five_fingerprints(cases):
         ax.set_facecolor(BG_COLOR)
 
         ax.set_yticks([0.25, 0.5, 0.75, 1.0])
-        ax.set_yticklabels([])
-        ax.set_ylim(0, 1.15)
+        if ABSOLUTE_AXES:
+            ax.set_yticklabels(["", "0.50", "", "1.00"], fontsize=7, color=MUTED_COLOR)
+            ax.set_rlabel_position(22.5)
+            ax.set_ylim(0, 1.08)
+        else:
+            ax.set_yticklabels([])
+            ax.set_ylim(0, 1.15)
 
         color = COLORS[idx]
         ax.plot(angles_closed, normed_closed, color=color, linewidth=2.2, zorder=3)
@@ -272,7 +334,7 @@ def fig2_five_fingerprints(cases):
         ax.grid(color=GRID_COLOR, alpha=0.4)
 
         # Per-panel title STAYS — it identifies the panel (caption can't do that).
-        # Extra pad lifts it clear of the radar's top vertex labels (FRC/SNK).
+        # Extra pad lifts it clear of the radar's top vertex labels (SEP/WIN).
         # Charcoal, not case-colored: the radar fill below already carries the color,
         # so colored text would be redundant and risks contrast/grayscale legibility.
         ax.set_title(f"Case {idx}: {CASE_DESCRIPTIONS[idx]}",
@@ -290,12 +352,10 @@ def fig2_five_fingerprints(cases):
     ax_leg.text(0.05, 0.95, "Axis key", fontsize=14, fontweight="bold",
                 color=TEXT_COLOR, va="top")
     key_pairs = [
-        ("ATK", "Attackability"),
-        ("SNK", "Sinking Ratio"),
-        ("FRC", "Shield Friction"),
-        ("STP", "Attractor Steepness"),
-        ("VPX", "Violation Proximity"),
-        ("ADR", "Attacker Dominance"),
+        ("WIN", "Winning Fraction"),
+        ("STP", "Shell Steepness"),
+        ("DDR", "Defender Dominance"),
+        ("SLT", "Shield Latitude"),
     ]
     y0, dy = 0.78, 0.115
     for r, (code, name) in enumerate(key_pairs):
@@ -303,6 +363,9 @@ def fig2_five_fingerprints(cases):
         ax_leg.text(0.05, yy, code, fontsize=12, fontweight="bold",
                     color=TEXT_COLOR, va="top", family="monospace")
         ax_leg.text(0.27, yy, name, fontsize=12, color=TEXT_COLOR, va="top")
+    ax_leg.text(0.05, y0 - len(key_pairs) * dy - 0.06,
+                "Larger shape $=$ more defensible",
+                fontsize=10, color=MUTED_COLOR, va="top")
 
     plt.tight_layout(rect=[0, 0.0, 1, 0.96 if EMBED_TITLES else 1.0])
     plt.subplots_adjust(hspace=0.62)
@@ -374,7 +437,7 @@ def fig3_state_space_decomposition(cases):
             continue
         sg = cases[idx]["safety_game"]
         w, tot = sg["winning_region_size"], sg["total_states"]
-        y_labels.append(f"Case {idx}\n|W| = {w:,}  ({w / tot * 100:.1f}%)")
+        y_labels.append(f"Case {idx}")
 
     ax.set_yticks(y_positions[:len(y_labels)])
     ax.set_yticklabels(y_labels, fontsize=11)
@@ -394,7 +457,7 @@ def fig3_state_space_decomposition(cases):
         Patch(facecolor=ZONE_COLORS["shell_1"], edgecolor="white", label="Shell 1"),
     ]
     ax.legend(handles=legend_elements, loc="upper right", fontsize=9,
-              framealpha=0.9, ncol=4, handlelength=1.2, handletextpad=0.4)
+              framealpha=0.9, ncol=4, handlelength=1.2, handletextpad=0.4, bbox_to_anchor=(1.0, 1.05),frameon=False)
 
     if EMBED_TITLES:
         fig.suptitle("Winning State Space Decomposition",
@@ -494,12 +557,186 @@ def fig4_dominance_comparison(cases):
 
 
 # ═══════════════════════════════════════════════════════════
+#  FIGURE 5: LEARNING TRAJECTORIES — CLEAN-HOST FRACTION
+# ═══════════════════════════════════════════════════════════
+# fig4 reports where adaptive play ENDS. fig5 reports how it GETS there, which
+# the endpoint cannot recover: two configurations may converge to neighbouring
+# operating points by opposite routes.
+#
+# The plotted quantity is the per-episode mean clean-host fraction — i.e. mu,
+# the integrand DDR averages — not a derived score. The reader therefore watches
+# the exact quantity being summarised, and the flat region confirms by
+# inspection that the L200 window measures post-convergence behaviour rather
+# than the tail of a transient.
+#
+# Only the seed MEAN is drawn. Per-seed dispersion is fig4's job; five std
+# ribbons on one axis are unreadable, and drawing both invites the reader to
+# compare ribbon widths that fig4 already states as confidence intervals.
+#
+# THE DETAIL PANEL HAS ONE JOB. Early training is dominated by exploration at
+# epsilon = 0.5, so the first few hundred episodes are noisy for every case and
+# a five-series zoom shows churn rather than structure. The panel therefore
+# carries only the pair named in DETAIL_CASES, under heavier smoothing and with
+# no raw trace, and exists to resolve a single claim: that the two exchange rank
+# during training, having started on the opposite ordering to the one they
+# finish on. Set DETAIL_CASES = None to show every case, or
+# SHOW_DETAIL_PANEL = False to drop the panel and run the main axis full width.
+
+L200_WINDOW   = 200    # shaded band; must match the L200 used in main.py
+EARLY_WINDOW  = 600    # detail panel span — wide enough to contain the transient
+SMOOTH_WINDOW = 25     # trailing moving average, in episodes; 1 disables smoothing
+SHOW_RAW_TRACE = True  # faint unsmoothed curve behind each mean, so smoothing hides nothing
+MARK_CROSSING  = True  # annotate where the two named cases exchange rank
+CROSSING_PAIR  = (1, 3)  # baseline vs relaxed phi_A
+
+SHOW_DETAIL_PANEL    = False
+DETAIL_CASES         = (1, 3)  # None -> all cases; a tuple -> only those
+DETAIL_SMOOTH_WINDOW = 60      # heavier than the main axis: this panel is a reading aid
+
+
+def fig5_learning_trajectories(episodes):
+    """Seed-mean clean-host fraction against episode.
+
+    Left: every case over the full run. Right: the pair named in DETAIL_CASES
+    over early training only.
+
+    NO TEXT IS PLACED INSIDE EITHER AXIS. Reference lines and shaded regions are
+    named in the legend; the single x-positioned callout sits above the top
+    spine. In-axis labels cannot be positioned safely against data that changes
+    between runs, and every placement rule eventually lands on a curve."""
+    if not episodes:
+        print("WARNING: no episode files loaded — skipping fig5")
+        return
+
+    apply_academic_style()
+
+    show_detail = SHOW_DETAIL_PANEL and len(episodes) >= 1
+    if show_detail:
+        fig, (ax, axz) = plt.subplots(
+            1, 2, figsize=(13, 5.5), gridspec_kw={"width_ratios": [3.4, 1.0]})
+    else:
+        fig, ax = plt.subplots(figsize=(12, 5.5))
+        axz = None
+    fig.patch.set_facecolor(BG_COLOR)
+    for a in (ax, axz):
+        if a is not None:
+            a.set_facecolor(BG_COLOR)
+
+    n_ep = max(ep["clean_perc"].shape[1] for ep in episodes.values())
+    early = min(EARLY_WINDOW, n_ep)
+    detail_set = set(DETAIL_CASES) if DETAIL_CASES else set(CASE_INDICES)
+    smoothed, handles = {}, []
+
+    for idx in CASE_INDICES:
+        if idx not in episodes:
+            continue
+        curve = episodes[idx]["clean_perc"].mean(axis=0) * 100.0
+        smoothed[idx] = _rolling_mean(curve, SMOOTH_WINDOW)
+        color = COLORS[idx]
+        x = np.arange(len(curve))
+
+        if SHOW_RAW_TRACE:
+            ax.plot(x, curve, color=color, linewidth=0.6, alpha=0.15, zorder=2)
+        ln, = ax.plot(x, smoothed[idx], color=color, linewidth=1.7, zorder=4,
+                      label=f"Case {idx} — {CASE_DESCRIPTIONS[idx]}")
+        handles.append(ln)
+
+        # Detail panel: heavier smoothing, no raw trace. The raw signal is
+        # already on the main axis; repeating it here would reintroduce exactly
+        # the churn this panel exists to see past.
+        if show_detail and idx in detail_set:
+            axz.plot(x[:early], _rolling_mean(curve, DETAIL_SMOOTH_WINDOW)[:early],
+                     color=color, linewidth=1.9, zorder=4)
+
+    # Modest padding only. With no in-axis annotation there is nothing to
+    # reserve headroom for, so the curves use the full panel.
+    lo = min(c.min() for c in smoothed.values())
+    hi = max(c.max() for c in smoothed.values())
+    pad = 0.07 * (hi - lo)
+    ax.set_ylim(lo - pad, hi + pad)
+    ax.set_xlim(0, n_ep)
+
+    # ── Shaded regions and reference line: named in the LEGEND ────────────
+    # The L200 band is the region fig4 summarises; the point of showing it is
+    # that every curve is already flat inside it.
+    ax.axvspan(n_ep - L200_WINDOW, n_ep, color=MUTED_COLOR, alpha=0.10, zorder=1)
+    if show_detail:
+        ax.axvspan(0, early, color=ACCENT_COLOR, alpha=0.05, zorder=1)
+
+    for a in (ax, axz):
+        if a is not None:
+            a.axhline(50, color="#999999", linestyle="--", linewidth=0.8,
+                      alpha=0.7, zorder=1)
+
+    handles.append(Line2D([0], [0], color="#999999", linestyle="--",
+                          linewidth=0.8, label="50% — even split"))
+    if show_detail:
+        handles.append(Patch(facecolor=ACCENT_COLOR, alpha=0.05,
+                             edgecolor="none",
+                             label=f"detail range (episodes 0–{early})"))
+    handles.append(Patch(facecolor=MUTED_COLOR, alpha=0.10, edgecolor="none",
+                         label=f"L200 window (DDR measured here)"))
+
+    # ── Rank exchange: marker inside, label ABOVE the top spine ───────────
+    # Located from the smoothed curves, not eyeballed: the first episode after
+    # which one case stays below the other for the remainder of training.
+    if MARK_CROSSING and all(i in smoothed for i in CROSSING_PAIR):
+        a_idx, b_idx = CROSSING_PAIR
+        cross = _last_sign_change(smoothed[a_idx], smoothed[b_idx])
+        if cross is not None:
+            ax.axvline(cross, color=TEXT_COLOR, linestyle=":", linewidth=1.1,
+                       alpha=0.85, zorder=3)
+            # Align so a crossing near either end cannot overflow the panel.
+            frac = cross / n_ep
+            ha = "left" if frac < 0.12 else ("right" if frac > 0.88 else "center")
+            ax.annotate(f"rank exchange — Case {b_idx} falls below Case {a_idx}, ep. {cross}",
+                        xy=(cross, 1.0), xycoords=("data", "axes fraction"),
+                        xytext=(0, 6), textcoords="offset points",
+                        ha=ha, va="bottom", fontsize=9, color=TEXT_COLOR,
+                        annotation_clip=False)
+
+    # ── Axes dressing ────────────────────────────────────────
+    ax.set_xlabel("Episode", fontsize=11)
+    ax.set_ylabel("Clean-host fraction (%)", fontsize=11)
+
+    if show_detail:
+        axz.set_xlabel("Episode", fontsize=11)
+        axz.set_xlim(0, early)
+        shown = sorted(i for i in detail_set if i in smoothed)
+        axz.set_title(f"Early training, episodes 0–{early}\n"
+                      + " vs ".join(f"Case {i}" for i in shown),
+                      fontsize=10.5, color=TEXT_COLOR)
+
+    for a in (ax, axz):
+        if a is None:
+            continue
+        for spine in ["top", "right"]:
+            a.spines[spine].set_visible(False)
+        a.yaxis.grid(True, color=GRID_COLOR, linewidth=0.5, alpha=0.7)
+        a.set_axisbelow(True)
+
+    # Legend below both panels. It carries the reference line and the shaded
+    # regions as well as the cases, since none of them may be labelled in-axis.
+    fig.legend(handles=handles, loc="lower center", ncol=4, fontsize=9,
+               framealpha=0.0, handlelength=1.8, columnspacing=2.0,
+               bbox_to_anchor=(0.5, -0.015))
+
+    if EMBED_TITLES:
+        fig.suptitle("Learning Trajectories — Clean-Host Fraction",
+                     fontsize=13, fontweight="bold", color=TEXT_COLOR)
+
+    plt.tight_layout(rect=[0, 0.10, 1, 0.955])
+    _save_figure(fig, "fig5_learning_trajectories.png")
+    plt.close(fig)
+
+
+# ═══════════════════════════════════════════════════════════
 #  SUMMARY TABLE (prints to console + saves as text)
 # ═══════════════════════════════════════════════════════════
 def print_comparison_table(cases):
     """Print a formatted comparison table of all metrics across cases."""
-    header = (f"{'Case':>6} | {'Description':<35} | {'ATK':>7} | {'SNK':>7} | "
-              f"{'FRC':>7} | {'STP':>7} | {'MSV':>7} | {'|W|':>8} | {'W%':>6} | "
+    header = (f"{'Case':>6} | {'Description':<35} | {'WIN':>7} | {'STP':>7} | "
+              f"{'SLT':>7} | {'|W|':>8} | {'W%':>6} | "
               f"{'DDR%':>8} | {'DDR CI':>18}")
     sep = "-" * len(header)
     print(f"\n{sep}")
@@ -518,11 +755,9 @@ def print_comparison_table(cases):
 
         row = (f"{idx:>6} | "
                f"{CASE_DESCRIPTIONS[idx]:<35} | "
-               f"{sg['attackability']:>7.3f} | "
-               f"{sg['sinking_ratio']:>7.3f} | "
-               f"{sg['shield_friction']:>7.3f} | "
-               f"{sg['attractor_steepness']:>7.3f} | "
-               f"{sg['mean_steps_to_violation']:>7.3f} | "
+               f"{sg['winning_fraction']:>7.3f} | "
+               f"{sg['shell_steepness']:>7.3f} | "
+               f"{sg['shield_latitude']:>7.3f} | "
                f"{sg['winning_region_size']:>8,} | "
                f"{sg['winning_region_pct']:>5.1f}% | "
                f"{dr['mean']:>7.1f}% | "
@@ -545,18 +780,41 @@ def print_comparison_table(cases):
 # ═══════════════════════════════════════════════════════════
 #  HELPERS
 # ═══════════════════════════════════════════════════════════
-def _compute_radar_maxima(cases):
-    """Per-axis max across all cases for consistent radar scaling.
+def _radar_maxima(cases):
+    """Per-axis scaling denominators.
+    Absolute mode: 1.0 on every axis (all metrics are already in [0,1]).
+    Relative mode: cross-case max per axis, padded 10% for breathing room.
     Pure function of the loaded data — no constants injected."""
+    if ABSOLUTE_AXES:
+        return [1.0] * len(METRIC_KEYS)
     maxima = [0.0] * len(METRIC_KEYS)
     for idx in CASE_INDICES:
         if idx not in cases:
             continue
-        vals = _get_radar_values(cases[idx])
-        for j, v in enumerate(vals):
+        for j, v in enumerate(_get_radar_values(cases[idx])):
             maxima[j] = max(maxima[j], v)
-    # Avoid zero maxima (div/0); pad 10% for visual breathing room.
     return [m * 1.1 if m > 0 else 1.0 for m in maxima]
+
+
+def _rolling_mean(y, w):
+    """Trailing moving average of width w, length preserved. The leading edge is
+    padded with y[0] rather than using mode='same', which would taper the first
+    w/2 points toward zero and manufacture a transient that is not in the data."""
+    if w <= 1:
+        return np.asarray(y, dtype=float)
+    y = np.asarray(y, dtype=float)
+    pad = np.concatenate([np.full(w - 1, y[0]), y])
+    return np.convolve(pad, np.ones(w) / w, mode="valid")
+
+
+def _last_sign_change(a, b):
+    """First index after which a - b holds one sign for the remainder.
+    Returns None if the two curves never exchange rank, so the annotation is
+    simply omitted rather than pointing at a coincidental single-episode touch."""
+    d = np.sign(np.asarray(a) - np.asarray(b))
+    d[d == 0] = 1
+    flips = np.flatnonzero(d[1:] != d[:-1])
+    return int(flips[-1]) + 1 if len(flips) else None
 
 
 def _save_figure(fig, filename, **kwargs):
@@ -577,14 +835,59 @@ def main():
 
     print(f"Loaded {len(cases)} cases: {list(cases.keys())}")
 
+    episodes = load_all_episodes()
+    if episodes:
+        print(f"Loaded episode traces for {len(episodes)} cases: {list(episodes.keys())}")
+
     print_comparison_table(cases)
     fig1_baseline_fingerprint(cases)
     fig2_five_fingerprints(cases)
     fig3_state_space_decomposition(cases)
     fig4_dominance_comparison(cases)
+    fig5_learning_trajectories(episodes)
 
     print(f"\nAll paper figures saved to {OUTPUT_DIR}/")
 
 
 if __name__ == "__main__":
     main()
+
+# ═══════════════════════════════════════════════════════════
+#  CAPTION NOTE
+# ═══════════════════════════════════════════════════════════
+# The LaTeX captions for fig1 and fig2 must match ABSOLUTE_AXES.
+#
+# ABSOLUTE_AXES = True:
+#   "The radius is absolute -- the rim is 1 on every axis and no cross-case
+#    rescaling is applied -- so a fingerprint may be read on its own and
+#    compared directly with one produced by an independent analysis."
+#
+# ABSOLUTE_AXES = False:
+#   "Each axis is scaled to its maximum across the cases compared here;
+#    printed values are raw metric scores. Shape differences across cases are
+#    meaningful, but a single fingerprint is not interpretable in isolation and
+#    cannot be overlaid on a fingerprint from a different comparison set."
+#
+# fig5 places NO TEXT INSIDE EITHER AXIS. The reference line and both shaded
+# regions are named in the legend, and the rank-exchange callout sits above the
+# top spine. Any future annotation must follow the same rule: in-axis labels
+# cannot be positioned safely against data that changes between runs.
+#
+# fig5 has no scaling toggle, but three settings change what the figure asserts:
+#
+# SMOOTH_WINDOW > 1:
+#   "Curves are seed means under a trailing moving average of SMOOTH_WINDOW
+#    episodes; the unsmoothed seed mean is drawn faintly behind each curve."
+#   Drop this sentence only if SMOOTH_WINDOW = 1.
+#
+# SHOW_RAW_TRACE = False:
+#   remove the clause about the unsmoothed curve, since it is no longer drawn.
+#
+# DETAIL_CASES:
+#   the right panel carries only these cases, under DETAIL_SMOOTH_WINDOW
+#   smoothing and with no raw trace. Name them in the caption — the panel is
+#   there to resolve one ordering claim, not to survey early training.
+#
+# The caption must also name the window: "the shaded band marks the final 200
+# episodes over which DDR is measured." Without it a reader cannot tell that
+# fig4 and fig5 report the same region of the same runs.
