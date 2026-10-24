@@ -31,7 +31,7 @@ Experiments
 Results are printed and written to metric_suite_results.{json,log}.
 """
 
-import argparse, itertools, json, math, time
+import argparse, itertools, json, math, os, time
 import numpy as np
 
 # ============================================================================
@@ -275,8 +275,19 @@ CONFIGS = {
     5: ("no VPN bypass",       dict(top=[[1, 0, 0, 0, 0], [1, 1, 0, 0, 0], [0, 1, 1, 0, 0],
                                          [0, 1, 1, 1, 0], [0, 0, 0, 1, 1]])),
 }
-# DDR supplied from the MARL runs (mean defender dominance, fraction).
-DDR = {1: 0.539, 2: 0.227, 3: 0.475, 4: 0.779, 5: 0.807}
+# DDR read from the MARL runs (ten-seed L200 mean, as a fraction) in results/.
+RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results")
+
+
+def _load_ddr():
+    out = {}
+    for c in CONFIGS:
+        with open(os.path.join(RESULTS_DIR, f"bastion_{c}_summary.json")) as f:
+            out[c] = json.load(f)["results"]["defender_dominance_pct"]["mean"] / 100.0
+    return out
+
+
+DDR = _load_ddr()
 
 
 def load(c):
@@ -287,14 +298,21 @@ def load(c):
 # STATISTICS
 # ============================================================================
 
+def _avg_rank(x):
+    order = np.argsort(x, kind="mergesort"); r = np.empty(len(x)); r[order] = np.arange(len(x), dtype=float)
+    for v in np.unique(x):
+        m = x == v
+        if m.sum() > 1: r[m] = r[m].mean()
+    return r
+
+
 def spearman(a, b):
     a, b = np.asarray(a, float), np.asarray(b, float)
     ok = np.isfinite(a) & np.isfinite(b)
     a, b = a[ok], b[ok]
     if len(a) < 3:
         return float("nan")
-    ra = np.argsort(np.argsort(a)).astype(float)
-    rb = np.argsort(np.argsort(b)).astype(float)
+    ra, rb = _avg_rank(a), _avg_rank(b)          # tie-corrected (average ranks)
     ra -= ra.mean(); rb -= rb.mean()
     return float((ra * rb).sum() / np.sqrt((ra ** 2).sum() * (rb ** 2).sum()))
 
@@ -339,7 +357,7 @@ def make_corpus(n, mixed, seed, log):
             slt = SLT(G, Rs)
             if not np.isfinite(slt):
                 continue
-            rows.append(dict(WIN=WIN(G), STP=STP(G), SLT=slt))
+            rows.append(dict(WIN=WIN(G), STP=STP(G), SLT=slt, v0_winning=bool(G["W"][S0])))
             dens.append((A.sum() - 5) / 20.0)
         except Exception:
             continue
@@ -387,7 +405,7 @@ def exp1(R, log):
     for i, k in enumerate(K):
         log(f"  {k:6s}" + "".join(f"{Cm[i, j]:9.3f}" for j in range(len(K))))
     mx = max(abs(Cm[3, j]) for j in range(3))
-    log(f"\n  adaptive vs static: max |r| = {mx:.3f}  (layers measure distinct properties)")
+    log(f"\n  adaptive vs static: max |r| = {mx:.3f}  (n = {len(CONFIGS)} configurations)")
     R["exp1"] = dict(values=out, corr=Cm.tolist(), keys=K)
 
 
@@ -405,15 +423,15 @@ def exp2(R, log, n):
         log(f"    {k:5s} R^2 = {r2_on_others(M, k, [o for o in K if o != k]):.4f}")
     rows_t, dens_t = make_corpus(n, mixed=False, seed=11, log=log)
     Mt = {k: np.array([r[k] for r in rows_t]) for k in K}
-    log("\n  Spearman vs edge density (topology-only corpus):")
+    log(f"\n  topology-only corpus: v0 winning in {sum(r['v0_winning'] for r in rows_t)} of {len(rows_t)} members")
+    log("\n  Spearman (tie-corrected) vs edge density (topology-only corpus):")
     for k in K:
         log(f"    r({k:4s}, density) = {spearman(Mt[k], dens_t):+.3f}")
-    log("\n  No single component dominates and every R^2 is low: the three static")
-    log("  metrics are non-redundant. Under topology variation WIN and SLT fall")
-    log("  with attack-graph density; STP responds oppositely.")
     R["exp2"] = dict(n=len(rows), explained=ev, loadings=V, keys=K,
                      r2={k: r2_on_others(M, k, [o for o in K if o != k]) for k in K},
-                     density_corr={k: spearman(Mt[k], dens_t) for k in K})
+                     density_corr={k: spearman(Mt[k], dens_t) for k in K},
+                     topology_corpus_n=len(rows_t),
+                     topology_corpus_v0_winning=int(sum(r["v0_winning"] for r in rows_t)))
 
 
 def exp3(R, log):
@@ -436,8 +454,6 @@ def exp3(R, log):
     spec = np.array([[abs(100 * (vals[c][k] - b[k]) / abs(b[k])) for k in K] for c in (3, 4)]).mean(0)
     log(f"\n  mean |%| topology     " + "".join(f"{x:9.2f}" for x in topo))
     log(f"  mean |%| specification" + "".join(f"{x:9.2f}" for x in spec))
-    log("\n  Under topology perturbations that preserve reachability the static")
-    log("  metrics barely move; DDR moves sharply. This is the static/adaptive split.")
     R["exp3"] = dict(values=vals, topo=dict(zip(K, topo.tolist())), spec=dict(zip(K, spec.tolist())))
 
 # ============================================================================

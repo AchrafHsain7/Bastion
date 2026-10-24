@@ -1,7 +1,7 @@
 {
   "bastion_idx": 3,
   "case_description": "Infinite Destroys",
-  "timestamp": "2026-07-22T19:59:38.677800",
+  "timestamp": "2026-10-24T09:47:13.646289",
   "config": {
     "n_runs": 10,
     "simulation_episodes": 3000,

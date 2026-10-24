@@ -5,10 +5,17 @@ import os
 import json
 from datetime import datetime
 
-from bastion1 import *
+import importlib
+
+# Case selection: `python3 main.py N` runs bastionN (default 1). Equivalent to
+# `from bastionN import *`; random-number consumption is unchanged.
+_CASE = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+globals().update({k: v for k, v in vars(importlib.import_module(f"bastion{_CASE}")).items()
+                  if not k.startswith("_")})
 
 
 RESULTS_DIR = "../results"
+QTABLE_DIR = os.path.join(RESULTS_DIR, "qtables")   # final Q-tables (Section 7.9)
 
 
 
@@ -60,9 +67,7 @@ def simulation(agent, max_iterations, adversary_respawn=0.1,  debug=False):
             print("Average Reward Defender:", average_reward_defender)
             print("="*20)
         
-        if analyzer.in_attractor[analyzer.map_idx[(*new_state, agent.automatonD.state, agent.automatonA.state)]]==1:
-            print("WHAAAAAAAAAAAAAAAT")
-            sys.exit()
+        
 
         state = new_state
     
@@ -108,11 +113,6 @@ if __name__ == "__main__":
     initial_unsafe = attractor_sizes[0]   # |A0|
     attractor_final = attractor_sizes[-1] # |Attr*|
     winning_region = len(analyzer.winning_region)
-    # attackability      = metrics["attackability"]
-    # sinking_ratio      = metrics["sinking"]
-    # shield_friction    = metrics["friction"]
-    # attractor_steepness = metrics["steepness"]
-    # mean_steps         = metrics["mean_steps"]
 
     safety_game_data = {
         "total_states":            total_states,
@@ -191,6 +191,11 @@ if __name__ == "__main__":
         
         metrics = analyzer.compute_metrics()
         print(metrics)
+        # Save the final learned Q-tables of this run (used by policy_robustness.py).
+        # Writing them consumes no random numbers, so all reported results are unchanged.
+        os.makedirs(QTABLE_DIR, exist_ok=True)
+        np.savez_compressed(os.path.join(QTABLE_DIR, f"bastion_{BASTION_IDX}_seed{i+1}_Q.npz"),
+                            QD=agent.QvaluesD, QA=agent.QvaluesA, epsilon_final=agent.epsilon)
         
         # Per-run summaries (using last 200 episodes)
         avRD = np.mean(average_reward_timeD[-200:])

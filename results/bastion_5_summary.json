@@ -1,7 +1,7 @@
 {
   "bastion_idx": 5,
   "case_description": "No VPN bypass",
-  "timestamp": "2026-07-22T20:00:05.544821",
+  "timestamp": "2026-10-24T09:47:20.859562",
   "config": {
     "n_runs": 10,
     "simulation_episodes": 3000,

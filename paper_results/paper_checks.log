@@ -1,0 +1,8 @@
+S5.3  first-two-shell share of absorbed non-initial mass: case 1 97.6%, case 2 97.8%, case 3 97.1%, case 4 99.2%, case 5 98.0%
+S7.2  |W| case 5 - case 2 = 548
+S7.3  positions with changed rank (case 1 vs 5): 128; reachable from v0 under admissible play: 0
+S7.6  case 2: retained positions 1041, mask changed 56, narrowed 56, left domain 24, entered domain 32
+S7.6  case 5: retained positions 985, mask changed 0, narrowed 0, left domain 80, entered domain 0
+S7.4/7.5  DDR case 5 - case 2 = +58.04 pp, Welch 95% CI [+56.46, +59.63] (df 16.8)
+S7.4/7.5  DDR case 5 - case 4 = +2.86 pp, Welch 95% CI [+1.47, +4.25] (df 11.0)
+S7.4/7.5  DDR case 3 - case 2 = +24.87 pp, Welch 95% CI [+23.81, +25.92] (df 11.2)

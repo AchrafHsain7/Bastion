@@ -21,8 +21,8 @@ JAIR polish (vs. the draft figures):
       rescaling and yields portable fingerprints; relative mode restores the
       cross-case min-max normalization for maximum within-set separation.
     * fig2: |W| subtext enlarged/bolded/darkened + thousands separators; bold axis key.
-    * fig1/fig2: four defender-oriented axes (WIN, SEP, DDR, SLT), larger = more
-      defensible. Static layer {WIN, SEP, SLT} + adaptive layer {DDR}. Earlier
+    * fig1/fig2: four axes (WIN, STP, DDR, SLT), each in [0,1] and read by its own
+      definition (STP = shell concentration). Static layer {WIN, STP, SLT} + adaptive layer {DDR}. Earlier
       Violation Proximity removed as algebraically derived / restated; see the
       metric review. fig3 and fig4 are unchanged.
     * fig3: x-axis capped at 100% (no dead space); |W| totals moved into the y labels.
@@ -89,7 +89,8 @@ EMBED_TITLES = False
 ABSOLUTE_AXES = True
 
 # ── Fingerprint axes ──
-# Four defender-oriented axes, all in [0,1], LARGER = MORE DEFENSIBLE.
+# Four axes, all in [0,1]; each is read by its own definition (paper Section 5):
+# extent (WIN), shell concentration (STP), permitted action labels (SLT), adaptive performance (DDR).
 #   Static layer  (functionals of the solved game: attractor + shield)
 #     WIN  Winning Fraction   |W| / (|S_x| - |U|)
 #     SEP  Shell Steepness    1 - H / ln(k_max)     (normalized entropy deficit)
@@ -117,8 +118,7 @@ METRIC_KEYS = [
 
 
 def _get_radar_values(case_dict):
-    """Extract radar values from a full case dict. All axes: higher = MORE
-    DEFENSIBLE. Three come from safety_game (static layer); one is the mean
+    """Extract radar values from a full case dict. Three come from safety_game (static layer); one is the mean
     defender dominance from the MARL results (adaptive layer). Every quantity
     is pulled straight from the JSON — no defaults invented. Shield latitude is
     computed by the analyzer over the shielded-reachable domain; state the
@@ -273,7 +273,7 @@ def fig1_baseline_fingerprint(cases):
 
     # Normalization disclosure — defuses the "why is it a balanced hexagon?" reviewer trap.
     # Each axis is scaled to its own cross-case maximum; printed numbers are raw scores.
-    disclosure = "Larger shape $=$ more defensible"
+    disclosure = "Metric values on a shared $[0,1]$ scale"
     ax.text(0.5, -0.12, disclosure,
             transform=ax.transAxes, ha="center", va="top",
             fontsize=8.5, color=MUTED_COLOR)
@@ -364,7 +364,7 @@ def fig2_five_fingerprints(cases):
                     color=TEXT_COLOR, va="top", family="monospace")
         ax_leg.text(0.27, yy, name, fontsize=12, color=TEXT_COLOR, va="top")
     ax_leg.text(0.05, y0 - len(key_pairs) * dy - 0.06,
-                "Larger shape $=$ more defensible",
+                "Metric values on a shared $[0,1]$ scale",
                 fontsize=10, color=MUTED_COLOR, va="top")
 
     plt.tight_layout(rect=[0, 0.0, 1, 0.96 if EMBED_TITLES else 1.0])

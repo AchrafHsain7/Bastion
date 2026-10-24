@@ -1,0 +1,23 @@
+Loaded 5 cases: [1, 2, 3, 4, 5]
+Loaded episode traces for 5 cases: [1, 2, 3, 4, 5]
+
+------------------------------------------------------------------------------------------------------------------------------
+WHAT-IF COMPARISON — TOPOLOGY DEFENSIBILITY METRICS
+------------------------------------------------------------------------------------------------------------------------------
+  Case | Description                         |     WIN |     STP |     SLT |      |W| |     W% |     DDR% |             DDR CI
+------------------------------------------------------------------------------------------------------------------------------
+     1 | Baseline topology                   |   0.475 |   0.510 |   0.718 |   23,730 |  15.8% |    53.9% | [  52.4%,   55.3%]
+     2 | Fully connected topology            |   0.466 |   0.513 |   0.707 |   23,310 |  15.5% |    22.7% | [  21.6%,   23.7%]
+     3 | Relaxed φ_A: Unlimited destroys     |   0.411 |   0.468 |   0.463 |   20,526 |  13.7% |    47.5% | [  47.2%,   47.9%]
+     4 | Relaxed φ_D: active >= 2            |   0.679 |   0.616 |   0.818 |   33,966 |  22.6% |    77.9% | [  77.4%,   78.3%]
+     5 | VPN bypass removed                  |   0.477 |   0.524 |   0.733 |   23,858 |  15.9% |    80.7% | [  79.4%,   82.1%]
+------------------------------------------------------------------------------------------------------------------------------
+
+Table saved: ../paper_results/comparison_table.txt
+Saved: ../paper_results/fig1_baseline_fingerprint.png
+Saved: ../paper_results/fig2_five_fingerprints.png
+Saved: ../paper_results/fig3_state_decomposition.png
+Saved: ../paper_results/fig4_dominance_comparison.png
+Saved: ../paper_results/fig5_learning_trajectories.png
+
+All paper figures saved to ../paper_results/
